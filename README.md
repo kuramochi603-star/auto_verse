@@ -1,2 +1,2 @@
-# auto_verse
+# first_app
 ぼくのかんがえたさいきょうのあぷり
