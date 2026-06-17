@@ -1,0 +1,1728 @@
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Sword, Crosshair, Wand2, RefreshCw, Play, ShieldAlert, Coins, Heart, Skull, Trophy, Shield, Plus, Star, Timer, Wind, Music, BarChart3, X, Eye, Lock, Unlock, Flame, Sparkles, Zap } from 'lucide-react';
+
+// --- サイバーパンク・ゲームデータ定義 ---
+const ICONS = { Sword, Crosshair, Wand2, Shield, Plus, Wind, Music, Skull, Eye, Flame, Sparkles, Zap };
+
+// speed: 1.0 が標準。数値が大きいほど行動間隔が短い（速い）
+const UNIT_DATA = {
+  // コスト 2
+  Knight: { name: 'サイバーナイト', hp: 60, atk: 15, range: 1, speed: 1.0, cost: 2, icon: 'Sword', color: 'bg-cyan-500', isBuffer: false, isDebuffer: false },
+  Archer: { name: 'レーザーレイダー', hp: 30, atk: 15, range: 3, speed: 1.2, cost: 2, icon: 'Crosshair', color: 'bg-emerald-500', isBuffer: false, isDebuffer: false },
+  Defender: { name: 'シールドアーマー', hp: 100, atk: 5, range: 1, speed: 0.7, cost: 2, icon: 'Shield', color: 'bg-zinc-600', isBuffer: false, isDebuffer: false },
+  // コスト 3
+  Mage:   { name: 'コードブレイカー', hp: 25, atk: 25, range: 2, speed: 0.8, cost: 3, icon: 'Sparkles', color: 'bg-violet-600', isBuffer: false, isDebuffer: false },
+  Cleric:   { name: 'ナノメディック', hp: 40, atk: 20, range: 2, speed: 0.9, cost: 3, icon: 'Plus', color: 'bg-rose-500', isHealer: true, isBuffer: false, isDebuffer: false },
+  Bard:     { name: 'アンプリファイア', hp: 45, atk: 5, range: 2, speed: 1.1, cost: 3, icon: 'Music', color: 'bg-amber-500', isBuffer: true, isDebuffer: false },
+  Shaman:   { name: 'ハッカー', hp: 35, atk: 10, range: 3, speed: 0.9, cost: 3, icon: 'Eye', color: 'bg-indigo-500', isBuffer: false, isDebuffer: true },
+  // コスト 4 (超強力エージェント)
+  Assassin: { name: 'ネオアサシン', hp: 45, atk: 35, range: 1, speed: 1.5, cost: 4, icon: 'Zap', color: 'bg-cyan-800', isBuffer: false, isDebuffer: false },
+  Archmage: { name: '量子マスター', hp: 50, atk: 50, range: 3, speed: 0.7, cost: 4, icon: 'Flame', color: 'bg-red-500', isBuffer: false, isDebuffer: false },
+  // ボス専用（ショップ除外）
+  Dragon:   { name: 'AI-DRAGON [マザーフレーム]', hp: 800, atk: 50, range: 2, speed: 0.8, cost: 0, icon: 'Skull', color: 'bg-rose-950', isBuffer: false, isDebuffer: false },
+};
+
+const ITEM_DATA = {
+  SwordItem: { name: 'ネオンブレード', atk: 15, hp: 0, speed: 0, cost: 3, icon: 'Sword', color: 'text-cyan-400' },
+  ShieldItem: { name: 'エナジーバリケード', atk: 0, hp: 80, speed: 0, cost: 3, icon: 'Shield', color: 'text-rose-400' },
+  BootsItem: { name: 'オーバークロッカー', atk: 0, hp: 0, speed: 0.4, cost: 3, icon: 'Wind', color: 'text-emerald-400' },
+};
+
+const ALL_TEMPLATES = Object.keys(UNIT_DATA).filter(k => k !== 'Dragon');
+const ALL_ITEMS = Object.keys(ITEM_DATA);
+
+// 図鑑（データベース）用のテキスト
+const DB_UNIT_DESC = {
+  Knight: "【近接アタッカー】標準的な物理攻撃プログラム。近接戦において、安定した耐久力と素早い剣撃で盤面維持に大きく貢献するベーシックエージェント。",
+  Archer: "【遠距離スピードアタッカー】最長射程3マスを誇り、遠距離から高速レーザービームを絶え間なく照射する。相手を安全な距離から削る後衛の火力要員。",
+  Defender: "【メインタンク】圧倒的な初期HPを誇り、前線で頑強に敵を引きつける鉄壁プログラム。攻撃力は皆無に近いが、味方アタッカーへの射線を通させない。",
+  Mage: "【範囲パルスアタッカー】ハッカーと明確に差別化された、美しいラベンダー色のシールドからパルス波を放つ。平均攻撃力が高く頼もしい魔法アタッカー。",
+  Cleric: "【専属ヒーラー】もっとも傷ついた（HPの割合が低い）味方にターゲットを合わせ、電脳ナノマシンにより驚異的な耐久値修復を行う必須のサポーター。",
+  Bard: "【全体オーバークロッカー】音楽パルスを放出し、自身の射程内のすべての味方プログラムの攻撃速度（スピード）を一時的に引き上げる強烈な指揮要員。",
+  Shaman: "【広範囲デバッファー】ターゲットとその隣接敵にウイルスパケットを流し込み、攻撃力および処理速度を永続的に低下させる強力なジャミングエージェント。",
+  Assassin: "【超高速キラー】圧倒的な俊敏性を誇る濃いシアンのハイスペックプログラム。敵に急接近し、雷撃（Zap）のようなスピードで瞬殺パージを繰り返す。",
+  Archmage: "【量子バスター】極太の量子共鳴レーザービームで、射線上の直線に位置するエネミー全てに壊滅的な特大範囲ダメージをたたき出す、最大コストの広域破壊兵器。",
+  Dragon: "【マスターフレーム】防衛グリッド最深部（LEVEL 10）に待ち受けるボス防衛エネミー。全電脳空間を揺るがすオーバーフローブラストを放射してくる。"
+};
+
+const DB_ITEM_DESC = {
+  SwordItem: "【ネオンブレード（物理増幅モジュール）】装着したプログラムの物理スタック能力を解放し、攻撃力（ATK）をダイレクトに「+15」強化する火力特化型ハードウェア。",
+  ShieldItem: "【エナジーバリケード（防御隔壁デバイス）】プログラムのシールド容量を大幅に増強し、最大HPを「+80」増幅させる。どんな軟弱なアタッカーでもタンク化が可能。",
+  BootsItem: "【オーバークロッカー（物理処理高速化デバイス）】コアのクロックレートを急上昇させ、攻撃スピードを「+0.4」向上させる。クレリックやバッファー、アサシンと極めて好相性。"
+};
+
+const BOARD_WIDTH = 4;
+const BOARD_HEIGHT = 4;
+const BENCH_SIZE = 4;
+const BATTLE_TIME_LIMIT = 180;
+
+// --- Wave 生成ヘルパー ---
+const generateEnemyWave = (round, buffMultiplier = 1.0) => {
+  const enemies = [];
+
+  // ラウンド10：最終ボス（マザーフレーム）
+  if (round === 10) {
+    const bossTemplate = 'Dragon';
+    enemies.push({
+      id: `enemy_boss_0`,
+      template: bossTemplate,
+      team: 'enemy',
+      status: 'board',
+      x: 1, y: 0,
+      ...UNIT_DATA[bossTemplate],
+      star: 3,
+      baseMaxHp: Math.floor(UNIT_DATA[bossTemplate].hp * buffMultiplier), 
+      baseAtk: Math.floor(UNIT_DATA[bossTemplate].atk * buffMultiplier), 
+      baseSpeed: UNIT_DATA[bossTemplate].speed,
+      hp: Math.floor(UNIT_DATA[bossTemplate].hp * buffMultiplier), 
+      maxHp: Math.floor(UNIT_DATA[bossTemplate].hp * buffMultiplier), 
+      atk: Math.floor(UNIT_DATA[bossTemplate].atk * buffMultiplier), 
+      speed: UNIT_DATA[bossTemplate].speed,
+      actionGauge: 0,
+      items: [],
+      buffs: []
+    });
+    return enemies;
+  }
+
+  // 通常ラウンドのエネミーセキュリティエージェント生成
+  const templates = ALL_TEMPLATES.filter(t => !UNIT_DATA[t].isHealer && !UNIT_DATA[t].isBuffer && !UNIT_DATA[t].isDebuffer);
+  const numEnemies = Math.min(round, 4);
+  
+  for (let i = 0; i < numEnemies; i++) {
+    const template = templates[Math.floor(Math.random() * templates.length)];
+    let x, y;
+    do {
+      x = Math.floor(Math.random() * BOARD_WIDTH);
+      y = Math.floor(Math.random() * 2); // 敵は盤面の上半分(y=0,1)に湧く
+    } while (enemies.some(e => e.x === x && e.y === y));
+
+    const hpMultiplier = 1 + (round - 1) * 0.15;
+    const atkMultiplier = 1 + (round - 1) * 0.08;
+    const enemyStar = round >= 8 ? 3 : (round >= 4 ? 2 : 1);
+
+    const baseMaxHp = Math.floor(UNIT_DATA[template].hp * hpMultiplier * buffMultiplier);
+    const baseAtk = Math.floor(UNIT_DATA[template].atk * atkMultiplier * buffMultiplier);
+
+    enemies.push({
+      id: `enemy_${round}_${i}`,
+      template,
+      team: 'enemy',
+      status: 'board',
+      x, y,
+      ...UNIT_DATA[template],
+      star: enemyStar,
+      baseMaxHp, baseAtk, baseSpeed: UNIT_DATA[template].speed,
+      hp: baseMaxHp, maxHp: baseMaxHp, atk: baseAtk, speed: UNIT_DATA[template].speed,
+      actionGauge: 0,
+      items: [],
+      buffs: []
+    });
+  }
+  return enemies;
+};
+
+export default function App() {
+  const [gameState, setGameState] = useState('prep'); // prep, battle, result, gameover, victory
+  const [round, setRound] = useState(1);
+  const [gold, setGold] = useState(10);
+  const [playerHp, setPlayerHp] = useState(3);
+  const [timeLeft, setTimeLeft] = useState(BATTLE_TIME_LIMIT);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isShopLocked, setIsShopLocked] = useState(false);
+  
+  const [shop, setShop] = useState({ units: [null, null, null, null], item: null });
+  const [inventory, setInventory] = useState([]);
+  const [playerUnits, setPlayerUnits] = useState([]);
+  const [enemyUnits, setEnemyUnits] = useState([]);
+  const [effects, setEffects] = useState([]);
+  
+  const [selectedCell, setSelectedCell] = useState(null); 
+  const [selectedItemIndex, setSelectedItemIndex] = useState(null);
+  const [battleLogs, setBattleLogs] = useState([]);
+  const [modalMessage, setModalMessage] = useState(null);
+  
+  const [battleReport, setBattleReport] = useState({});
+
+  // 図鑑用ステート
+  const [isDbOpen, setIsDbOpen] = useState(false);
+  const [dbTab, setDbTab] = useState('units'); // 'units' | 'items'
+
+  const [aiAdvice, setAiAdvice] = useState(null);
+  const [isLoadingAdvice, setIsLoadingAdvice] = useState(false);
+  const [isEventLoading, setIsEventLoading] = useState(false);
+  const [randomEvent, setRandomEvent] = useState(null);
+  const [nextRoundEnemyBuff, setNextRoundEnemyBuff] = useState(1.0);
+  const [isAutoRefreshActive, setIsAutoRefreshActive] = useState(false); 
+  const [promotedUnitId, setPromotedUnitId] = useState(null); 
+  const [originalUnitState, setOriginalUnitState] = useState(null); 
+  const apiKey = "";
+
+  const calculateInterest = (currentGold) => Math.floor(currentGold / 3);
+
+  const getCellCenter = (x, y) => {
+    return {
+      x: `${(x + 0.5) * 25}%`,
+      y: `${(y + 0.5) * 25}%`
+    };
+  };
+
+  const getGeminiAdvice = async () => {
+    if (isLoadingAdvice) return;
+    setIsLoadingAdvice(true);
+    setAiAdvice(null);
+    
+    const board = playerUnits.filter(u => u.status === 'board').map(u => `★${u.star}${u.name}`).join(', ');
+    const bench = playerUnits.filter(u => u.status === 'bench').map(u => `★${u.star}${u.name}`).join(', ');
+    
+    const prompt = `あなたは電脳防衛グリッドを監視する最新鋭の戦術支援AI（AIタクティシャン）です。
+現在のネット空間防衛状況:
+- セキュリティ階層 (ラウンド): ${round}
+- 利用可能リソース (ゴールド): ${gold}G
+- 配備中プログラム (盤面): ${board || 'なし'}
+- メモリ内待機プログラム (ベンチ): ${bench || 'なし'}
+
+このリソースとプログラム配置を踏まえ、次に行うべき最適ビルドアクション（どのプログラムを購入・マージすべきか、リソースをプールしてキャッシュ利息(3Gごとに1G)を狙うべきか、防衛配置のコツなど）について、ハッカー風あるいはシステムコンソール風のクールな日本語2〜3文（100文字程度）で最適解を提案してください。`;
+
+    const payload = {
+      contents: [{ parts: [{ text: prompt }] }]
+    };
+
+    let retries = 5;
+    let delay = 1000;
+    let success = false;
+
+    while (retries > 0 && !success) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) throw new Error('API Request Failed');
+        
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          setAiAdvice(text);
+          success = true;
+        } else {
+          throw new Error('Empty response');
+        }
+      } catch (err) {
+        retries--;
+        if (retries === 0) {
+          setAiAdvice("ノイズ干渉検知。メインフレームがビジー状態です。数ミリ秒後に再アクセスしてください。");
+        } else {
+          await new Promise(r => setTimeout(r, delay));
+          delay *= 2;
+        }
+      }
+    }
+    setIsLoadingAdvice(false);
+  };
+
+  const triggerRandomEvent = async (currentRound) => {
+    setIsEventLoading(true);
+    
+    const prompt = `あなたはサイバーパンク世界のシステムゲームマスター（AIネットウォッチ）です。電脳防衛グリッド階層（ラウンド${currentRound}）のメモリ展開時に検出された突発的な「システムエラー」「クラッキング」「闇ネットワークの取引」「グリッチ」などのサイバーSF的な突発イベントを1つ作成してください。`;
+
+    const payload = {
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "OBJECT",
+          properties: {
+            title: { type: "STRING", description: "サイバーチックなイベントのタイトル（例：ダークネットの裏取引、メモリリーク、オーバークロックバーストなど）" },
+            description: { type: "STRING", description: "システム異常や電脳世界での出来事の短いストーリー解説" },
+            effect: { type: "STRING", enum: ["REWARD_GOLD", "REWARD_ITEM", "REWARD_UNIT", "PUNISH_ENEMY_BUFF", "FREE_SHOP_REFRESH", "PROMOTED_UNIT"], description: "適用されるシステム変化効果" }
+          },
+          required: ["title", "description", "effect"]
+        }
+      }
+    };
+
+    let retries = 3;
+    let delay = 1000;
+    let success = false;
+
+    while (retries > 0 && !success) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        if (!response.ok) throw new Error('API Request Failed');
+        
+        const data = await response.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          setRandomEvent(JSON.parse(text));
+          success = true;
+        } else {
+          throw new Error('Empty response');
+        }
+      } catch (err) {
+        retries--;
+        if (retries > 0) {
+          await new Promise(r => setTimeout(r, delay));
+          delay *= 2;
+        }
+      }
+    }
+    setIsEventLoading(false);
+  };
+
+  const applyEventEffect = () => {
+    if (!randomEvent) return;
+    const { effect, title } = randomEvent;
+    let logMsg = `【SYSTEM】${title} - `;
+    
+    if (effect === 'REWARD_GOLD') {
+      const amount = Math.floor(Math.random() * 6) + 5;
+      setGold(g => g + amount);
+      logMsg += `暗号通貨の取得成功：+${amount}G`;
+    } else if (effect === 'REWARD_ITEM') {
+      if (inventory.length < 4) {
+        const newItemType = ALL_ITEMS[Math.floor(Math.random() * ALL_ITEMS.length)];
+        setInventory(prev => [...prev, { ...ITEM_DATA[newItemType], template: newItemType, id: Math.random() }]);
+        logMsg += `デバイス「${ITEM_DATA[newItemType].name}」の不正インストールに成功！`;
+      } else {
+        logMsg += `デバイスをクラックしたが、スロット（インベントリ）不足によりパージされた。`;
+      }
+    } else if (effect === 'REWARD_UNIT') {
+      const benchUnits = playerUnits.filter(u => u.status === 'bench');
+      if (benchUnits.length < BENCH_SIZE) {
+        const type = ALL_TEMPLATES[Math.floor(Math.random() * ALL_TEMPLATES.length)];
+        const usedIndices = benchUnits.map(u => u.index);
+        let newIndex = 0;
+        while (usedIndices.includes(newIndex)) newIndex++;
+        
+        const newUnit = {
+          id: `player_event_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+          template: type,
+          team: 'player',
+          status: 'bench',
+          index: newIndex,
+          x: -1, y: -1, startX: -1, startY: -1,
+          star: 1,
+          isHealer: UNIT_DATA[type].isHealer || false,
+          isBuffer: UNIT_DATA[type].isBuffer || false,
+          isDebuffer: UNIT_DATA[type].isDebuffer || false,
+          baseMaxHp: UNIT_DATA[type].hp,
+          baseAtk: UNIT_DATA[type].atk,
+          baseSpeed: UNIT_DATA[type].speed,
+          maxHp: UNIT_DATA[type].hp,
+          hp: UNIT_DATA[type].hp,
+          atk: UNIT_DATA[type].atk,
+          speed: UNIT_DATA[type].speed,
+          actionGauge: 0,
+          items: [],
+          buffs: [],
+          ...UNIT_DATA[type]
+        };
+        setPlayerUnits(prev => processMerges([...prev, newUnit]));
+        logMsg += `プログラム「${UNIT_DATA[type].name}」のバックドア展開に成功！`;
+      } else {
+        logMsg += `プログラムを受信したが、メモリ（ベンチ）空き容量がありません。`;
+      }
+    } else if (effect === 'PUNISH_ENEMY_BUFF') {
+      setNextRoundEnemyBuff(1.5);
+      logMsg += `メインフレームがファイアウォールを緊急展開：エネミーセキュリティ強化 (x1.5)`;
+    } else if (effect === 'FREE_SHOP_REFRESH') {
+      setIsAutoRefreshActive(true);
+      logMsg += `マーケットネットワーク同期異常：ショップ自動無料アップデート発動！`;
+    } else if (effect === 'PROMOTED_UNIT') {
+      const boardUnits = playerUnits.filter(u => u.status === 'board');
+      if (boardUnits.length > 0) {
+        const target = boardUnits[Math.floor(Math.random() * boardUnits.length)];
+        
+        setPromotedUnitId(target.id);
+        setOriginalUnitState({
+          star: target.star,
+          baseMaxHp: target.baseMaxHp,
+          baseAtk: target.baseAtk,
+          maxHp: target.maxHp,
+          atk: target.atk,
+          hp: target.hp
+        });
+
+        setPlayerUnits(prev => prev.map(u => {
+          if (u.id === target.id) {
+            const scale = Math.pow(2, 3 - u.star); 
+            const newBaseMaxHp = u.baseMaxHp * scale;
+            const newBaseAtk = u.baseAtk * scale;
+            
+            const itemHp = u.items.reduce((sum, item) => sum + item.hp, 0);
+            const itemAtk = u.items.reduce((sum, item) => sum + item.atk, 0);
+
+            return {
+              ...u,
+              star: 3,
+              baseMaxHp: newBaseMaxHp,
+              baseAtk: newBaseAtk,
+              maxHp: newBaseMaxHp + itemHp,
+              atk: newBaseAtk + itemAtk,
+              hp: newBaseMaxHp + itemHp
+            };
+          }
+          return u;
+        }));
+        logMsg += `「${target.name}」のソースコードにブーストパッチを適用、今ラウンド限定【★3化】`;
+      } else {
+        logMsg += `ブーストパッチが展開されたが、ロードされているプログラム（盤面）が存在しません。`;
+      }
+    }
+    
+    setBattleLogs(prev => [logMsg, ...prev].slice(0, 15));
+    setRandomEvent(null);
+  };
+
+  useEffect(() => {
+    if (!isInitialized) {
+      const initialUnits = [];
+      const starters = ['Knight', 'Archer', 'Defender'];
+      for (let i = 0; i < 3; i++) {
+        const template = starters[Math.floor(Math.random() * starters.length)];
+        initialUnits.push({
+          id: `player_init_${i}_${Math.floor(Math.random()*1000)}`,
+          template,
+          team: 'player',
+          status: 'bench',
+          index: i,
+          x: -1, y: -1, startX: -1, startY: -1,
+          star: 1,
+          isHealer: UNIT_DATA[template].isHealer || false,
+          isBuffer: UNIT_DATA[template].isBuffer || false,
+          isDebuffer: UNIT_DATA[template].isDebuffer || false,
+          baseMaxHp: UNIT_DATA[template].hp,
+          baseAtk: UNIT_DATA[template].atk,
+          baseSpeed: UNIT_DATA[template].speed,
+          maxHp: UNIT_DATA[template].hp,
+          hp: UNIT_DATA[template].hp,
+          atk: UNIT_DATA[template].atk,
+          speed: UNIT_DATA[template].speed,
+          actionGauge: 0,
+          items: [],
+          buffs: [],
+          ...UNIT_DATA[template]
+        });
+      }
+      setPlayerUnits(initialUnits);
+      setIsInitialized(true);
+    }
+  }, [isInitialized]);
+
+  const refreshShop = useCallback(() => {
+    const newUnits = Array.from({ length: 4 }).map(() => {
+      const type = ALL_TEMPLATES[Math.floor(Math.random() * ALL_TEMPLATES.length)];
+      return { template: type, cost: UNIT_DATA[type].cost };
+    });
+    const newItemType = ALL_ITEMS[Math.floor(Math.random() * ALL_ITEMS.length)];
+    const newItem = { template: newItemType, cost: ITEM_DATA[newItemType].cost };
+    
+    setShop({ units: newUnits, item: newItem });
+  }, []);
+
+  useEffect(() => { refreshShop(); }, [refreshShop]);
+
+  useEffect(() => {
+    if (gameState === 'prep' && isAutoRefreshActive) {
+      const timer = setInterval(() => {
+        if (!isShopLocked) {
+          refreshShop();
+        }
+      }, 3000); 
+      return () => clearInterval(timer);
+    }
+  }, [gameState, isAutoRefreshActive, isShopLocked, refreshShop]);
+
+  const processMerges = (units) => {
+    let currentUnits = [...units];
+    let merged = true;
+    
+    while (merged) {
+      merged = false;
+      const groups = {};
+      
+      currentUnits.forEach(u => {
+        if (u.team === 'player' && u.star < 3) {
+          const key = `${u.template}_${u.star}`;
+          if (!groups[key]) groups[key] = [];
+          groups[key].push(u);
+        }
+      });
+
+      for (const key in groups) {
+        if (groups[key].length >= 3) {
+          const targets = groups[key].slice(0, 3);
+          targets.sort((a, b) => (a.status === 'board' ? -1 : 1));
+          
+          const baseUnit = targets[0];
+          const removeIds = [targets[1].id, targets[2].id];
+          
+          const allItems = [...targets[0].items, ...targets[1].items, ...targets[2].items];
+
+          currentUnits = currentUnits.filter(u => !removeIds.includes(u.id));
+          
+          const upgradedUnit = currentUnits.find(u => u.id === baseUnit.id);
+          upgradedUnit.star += 1;
+          upgradedUnit.baseMaxHp *= 2;
+          upgradedUnit.baseAtk *= 2;
+          upgradedUnit.items = allItems;
+
+          const itemHp = allItems.reduce((sum, item) => sum + item.hp, 0);
+          const itemAtk = allItems.reduce((sum, item) => sum + item.atk, 0);
+          const itemSpeed = allItems.reduce((sum, item) => sum + item.speed, 0);
+
+          upgradedUnit.maxHp = upgradedUnit.baseMaxHp + itemHp;
+          upgradedUnit.hp = upgradedUnit.maxHp;
+          upgradedUnit.atk = upgradedUnit.baseAtk + itemAtk;
+          upgradedUnit.speed = upgradedUnit.baseSpeed + itemSpeed;
+
+          merged = true;
+          break;
+        }
+      }
+    }
+    return currentUnits;
+  };
+
+  const buyUnit = (item, shopIndex) => {
+    if (gameState !== 'prep') return;
+    if (gold < item.cost) { alert("リソース（ゴールド）が不足しています。"); return; }
+    
+    const benchUnits = playerUnits.filter(u => u.status === 'bench');
+    const matchingCount = playerUnits.filter(u => u.template === item.template && u.star === 1).length;
+    
+    if (benchUnits.length >= BENCH_SIZE && matchingCount < 2) {
+      alert("メモリ待機ベンチが満杯です。"); return;
+    }
+
+    setGold(prev => prev - item.cost);
+    
+    const usedIndices = benchUnits.map(u => u.index);
+    let newIndex = 0;
+    while (usedIndices.includes(newIndex)) newIndex++;
+
+    const newUnit = {
+      id: `player_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+      template: item.template,
+      team: 'player',
+      status: 'bench',
+      index: newIndex,
+      x: -1, y: -1, startX: -1, startY: -1,
+      star: 1,
+      isHealer: UNIT_DATA[item.template].isHealer || false,
+      isBuffer: UNIT_DATA[item.template].isBuffer || false,
+      isDebuffer: UNIT_DATA[item.template].isDebuffer || false,
+      baseMaxHp: UNIT_DATA[item.template].hp,
+      baseAtk: UNIT_DATA[item.template].atk,
+      baseSpeed: UNIT_DATA[item.template].speed,
+      maxHp: UNIT_DATA[item.template].hp,
+      hp: UNIT_DATA[item.template].hp,
+      atk: UNIT_DATA[item.template].atk,
+      speed: UNIT_DATA[item.template].speed,
+      actionGauge: 0,
+      items: [],
+      buffs: [],
+      ...UNIT_DATA[item.template]
+    };
+
+    setPlayerUnits(prev => processMerges([...prev, newUnit]));
+    const newUnits = [...shop.units];
+    newUnits[shopIndex] = null;
+    setShop(prev => ({ ...prev, units: newUnits }));
+  };
+
+  const buyItem = () => {
+    if (gameState !== 'prep') return;
+    const item = shop.item;
+    if (!item) return;
+    if (gold < item.cost) { alert("リソース（ゴールド）が不足しています。"); return; }
+    if (inventory.length >= 4) { alert("インベントリスロットが満杯です。"); return; }
+
+    setGold(prev => prev - item.cost);
+    setInventory(prev => [...prev, { ...ITEM_DATA[item.template], template: item.template, id: Math.random() }]);
+    setShop(prev => ({ ...prev, item: null }));
+  };
+
+  const manualRefresh = () => {
+    if (gold >= 1) { 
+      setGold(prev => prev - 1); 
+      setIsShopLocked(false);
+      refreshShop(); 
+    }
+  };
+
+  const handleCellClick = (area, x, y, index) => {
+    if (gameState !== 'prep') return;
+
+    let clickedUnit = null;
+    if (area === 'bench') clickedUnit = playerUnits.find(u => u.status === 'bench' && u.index === index);
+    else clickedUnit = playerUnits.find(u => u.status === 'board' && u.x === x && u.y === y);
+
+    if (selectedItemIndex !== null) {
+      if (clickedUnit) {
+        const itemToEquip = inventory[selectedItemIndex];
+        setPlayerUnits(prevUnits => {
+          const newUnits = [...prevUnits];
+          const unitIdx = newUnits.findIndex(u => u.id === clickedUnit.id);
+          const targetUnit = { ...newUnits[unitIdx] };
+          
+          targetUnit.items = [...targetUnit.items, itemToEquip];
+          targetUnit.maxHp += itemToEquip.hp;
+          targetUnit.hp += itemToEquip.hp;
+          targetUnit.atk += itemToEquip.atk;
+          targetUnit.speed += itemToEquip.speed;
+          
+          newUnits[unitIdx] = targetUnit;
+          return newUnits;
+        });
+        setInventory(prev => prev.filter((_, i) => i !== selectedItemIndex));
+        setSelectedItemIndex(null);
+      } else setSelectedItemIndex(null);
+      return;
+    }
+
+    if (!selectedCell) {
+      if (clickedUnit) setSelectedCell({ area, x, y, index, unitId: clickedUnit.id });
+    } else {
+      setPlayerUnits(prevUnits => {
+        const newUnits = [...prevUnits];
+        const selectedUnitIndex = newUnits.findIndex(u => u.id === selectedCell.unitId);
+        if (selectedUnitIndex === -1) return prevUnits;
+        const selectedUnit = newUnits[selectedUnitIndex];
+
+        if (clickedUnit) {
+          const targetUnitIndex = newUnits.findIndex(u => u.id === clickedUnit.id);
+          const targetUnit = newUnits[targetUnitIndex];
+          
+          const tStatus = selectedUnit.status, tIndex = selectedUnit.index, tX = selectedUnit.x, tY = selectedUnit.y;
+          selectedUnit.status = targetUnit.status; selectedUnit.index = targetUnit.index; selectedUnit.x = targetUnit.x; selectedUnit.y = targetUnit.y;
+          targetUnit.status = tStatus; targetUnit.index = tIndex; targetUnit.x = tX; targetUnit.y = tY;
+        } else {
+          if (area === 'bench') {
+            selectedUnit.status = 'bench'; selectedUnit.index = index; selectedUnit.x = -1; selectedUnit.y = -1;
+          } else {
+            selectedUnit.status = 'board'; selectedUnit.x = x; selectedUnit.y = y; selectedUnit.index = -1;
+          }
+        }
+        return newUnits;
+      });
+      setSelectedCell(null);
+    }
+  };
+
+  const getSelectedUnit = () => {
+    if (!selectedCell) return null;
+    return playerUnits.find(u => u.id === selectedCell.unitId) || null;
+  };
+
+  const sellSelectedUnit = () => {
+    if (gameState !== 'prep') return;
+    const unit = getSelectedUnit();
+    if (!unit) return;
+    const sellPrice = unit.cost * Math.pow(3, unit.star - 1);
+    setGold(prev => prev + sellPrice);
+    setPlayerUnits(prev => prev.filter(u => u.id !== unit.id));
+    if (promotedUnitId === unit.id) {
+      setPromotedUnitId(null);
+      setOriginalUnitState(null);
+    }
+    setSelectedCell(null);
+  };
+
+  const handleBattleEnd = useCallback((result) => {
+    if (gameState !== 'battle') return;
+    setGameState('result');
+    
+    const interest = calculateInterest(gold);
+    let newLogs = [];
+
+    if (result === 'win') {
+      const baseReward = 6;
+      const totalReward = baseReward + interest;
+      setModalMessage(`SIMULATION SUCESS! (+${baseReward}G, 利息キャッシュ+${interest}G)`);
+      setGold(prev => prev + totalReward);
+      newLogs.push(`[SYSTEM_LOG] 防衛成功：獲得 +${baseReward}G, メモリ利息 +${interest}G`);
+      if (round >= 10) setTimeout(() => setGameState('victory'), 3000);
+    } else {
+      const loseReward = 2;
+      const totalReward = loseReward + interest;
+      setModalMessage(result === 'timeout' ? `SYNCHRONIZE TIMEOUT! (HP -1, 利息キャッシュ+${interest}G)` : `SYSTEM DAMAGE... (HP -1, 利息キャッシュ+${interest}G)`);
+      setPlayerHp(prev => {
+        const newHp = prev - 1;
+        if (newHp <= 0) setTimeout(() => setGameState('gameover'), 3000);
+        return newHp;
+      });
+      setGold(prev => prev + totalReward);
+      newLogs.push(`[SYSTEM_LOG] 防衛失敗 (コア防御シールド -1), 復旧補償 +${loseReward}G, 利息キャッシュ +${interest}G`);
+    }
+
+    setBattleLogs(prev => [...newLogs, ...prev].slice(0, 15));
+  }, [gold, round, gameState]);
+
+  const proceedToNextRound = () => {
+    const nextR = round + 1;
+    setRound(nextR);
+    setGameState('prep');
+    setModalMessage(null);
+    setEffects([]);
+    setBattleReport({});
+
+    // 一時星3強化ユニットの復元
+    let nextPlayerUnits = [...playerUnits];
+    if (promotedUnitId && originalUnitState) {
+      nextPlayerUnits = nextPlayerUnits.map(u => {
+        if (u.id === promotedUnitId) {
+          const itemHp = u.items.reduce((sum, item) => sum + item.hp, 0);
+          const itemAtk = u.items.reduce((sum, item) => sum + item.atk, 0);
+
+          return {
+            ...u,
+            star: originalUnitState.star,
+            baseMaxHp: originalUnitState.baseMaxHp,
+            baseAtk: originalUnitState.baseAtk,
+            maxHp: originalUnitState.baseMaxHp + itemHp,
+            atk: originalUnitState.baseAtk + itemAtk,
+            hp: Math.min(originalUnitState.baseMaxHp + itemHp, u.hp)
+          };
+        }
+        return u;
+      });
+      setPromotedUnitId(null);
+      setOriginalUnitState(null);
+    }
+
+    setPlayerUnits(nextPlayerUnits.map(u => {
+      if (u.status === 'board') return { ...u, x: u.startX, y: u.startY, hp: u.maxHp, actionGauge: 0, buffs: [] };
+      return u;
+    }));
+    setEnemyUnits([]);
+    
+    if (isShopLocked) {
+      setIsShopLocked(false);
+    } else {
+      refreshShop();
+    }
+
+    if (nextR < 10 && Math.random() < 0.2) {
+      triggerRandomEvent(nextR);
+    }
+  };
+
+  useEffect(() => {
+    if (gameState !== 'battle') return;
+    const timer = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) { handleBattleEnd('timeout'); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [gameState, handleBattleEnd]);
+
+  const startBattle = () => {
+    const boardUnits = playerUnits.filter(u => u.status === 'board');
+    if (boardUnits.length === 0) { alert("アクティブエリア（盤面）にプログラムを配備してください。"); return; }
+
+    const initialReport = {};
+    boardUnits.forEach(u => { initialReport[u.id] = { name: u.name, damage: 0, heal: 0, team: 'player', star: u.star }; });
+    
+    const generatedEnemies = generateEnemyWave(round, nextRoundEnemyBuff);
+    generatedEnemies.forEach(e => { initialReport[e.id] = { name: e.name, damage: 0, heal: 0, team: 'enemy', star: e.star }; });
+    
+    setBattleReport(initialReport);
+
+    setPlayerUnits(prev => prev.map(u => u.status === 'board' ? { ...u, startX: u.x, startY: u.y, hp: u.maxHp, actionGauge: 0, buffs: [] } : u));
+    setEnemyUnits(generatedEnemies);
+    setTimeLeft(BATTLE_TIME_LIMIT);
+    setEffects([]);
+    setGameState('battle');
+    setBattleLogs([`--- GRID LEVEL ${round} SECURITY SHIELD ON ---`]);
+    setSelectedCell(null);
+    setSelectedItemIndex(null);
+    setNextRoundEnemyBuff(1.0);
+    setIsAutoRefreshActive(false); 
+  };
+
+  useEffect(() => {
+    if (gameState !== 'battle') return;
+
+    const tickSpeed = 150;
+    const timer = setTimeout(() => {
+      let nextPlayers = JSON.parse(JSON.stringify(playerUnits));
+      let nextEnemies = JSON.parse(JSON.stringify(enemyUnits));
+      let newEffects = [];
+      let newLogs = [];
+      let reportUpdate = { ...battleReport };
+
+      const pAlive = nextPlayers.filter(u => u.hp > 0 && u.status === 'board');
+      const eAlive = nextEnemies.filter(u => u.hp > 0);
+
+      if (eAlive.length === 0) { handleBattleEnd('win'); return; }
+      if (pAlive.length === 0) { handleBattleEnd('lose'); return; }
+
+      const allUnits = [...pAlive, ...eAlive];
+      
+      allUnits.forEach(u => {
+        if (u.buffs.length > 0) {
+          u.buffs = u.buffs.map(b => ({ ...b, duration: b.duration - 1 })).filter(b => b.duration > 0);
+        }
+      });
+
+      allUnits.forEach(u => {
+        let currentSpeed = u.speed;
+        u.buffs.forEach(b => { 
+          if (b.type === 'speed' || b.type === 'speedDown') currentSpeed += b.amount; 
+        });
+        currentSpeed = Math.max(0.1, currentSpeed);
+        u.actionGauge += currentSpeed * 15; 
+      });
+
+      const readyUnits = allUnits.filter(u => u.actionGauge >= 100).sort(() => Math.random() - 0.5);
+
+      readyUnits.forEach(actingUnit => {
+        const teamUnits = actingUnit.team === 'player' ? nextPlayers : nextEnemies;
+        const currentActing = teamUnits.find(u => u.id === actingUnit.id);
+        if (!currentActing || currentActing.hp <= 0 || currentActing.actionGauge < 100) return;
+
+        currentActing.actionGauge -= 100;
+
+        let actualAtk = currentActing.atk;
+        currentActing.buffs.forEach(b => {
+          if (b.type === 'atkDown') actualAtk += b.amount;
+        });
+        actualAtk = Math.max(1, actualAtk);
+
+        let targetCandidates = [];
+        if (currentActing.isHealer || currentActing.isBuffer) {
+          targetCandidates = teamUnits.filter(u => u.hp > 0 && u.id !== currentActing.id && u.status === 'board');
+          if (currentActing.isHealer && targetCandidates.length > 0) {
+             targetCandidates.sort((a,b) => (a.hp/a.maxHp) - (b.hp/b.maxHp));
+          }
+        } else {
+          targetCandidates = actingUnit.team === 'player' ? nextEnemies.filter(u => u.hp > 0) : nextPlayers.filter(u => u.hp > 0 && u.status === 'board');
+        }
+
+        if (targetCandidates.length === 0) return;
+
+        let closest = null;
+        let minDist = Infinity;
+        if (currentActing.isHealer) {
+           closest = targetCandidates[0];
+           minDist = Math.abs(closest.x - currentActing.x) + Math.abs(closest.y - currentActing.y);
+        } else {
+          targetCandidates.forEach(t => {
+            const dist = Math.abs(t.x - currentActing.x) + Math.abs(t.y - currentActing.y);
+            if (dist < minDist) { minDist = dist; closest = t; }
+          });
+        }
+
+        if (closest) {
+          if (minDist <= currentActing.range || currentActing.isHealer) {
+            const targetRef = (closest.team === 'player' ? nextPlayers : nextEnemies).find(u => u.id === closest.id);
+            
+            if (currentActing.isHealer) {
+              const healAmount = actualAtk;
+              targetRef.hp = Math.min(targetRef.maxHp, targetRef.hp + healAmount);
+              reportUpdate[currentActing.id].heal += healAmount;
+              newEffects.push({ id: Math.random(), targetId: targetRef.id, text: `+${healAmount}`, type: 'heal' });
+              newEffects.push({
+                id: Math.random(),
+                type: 'cyberEffect',
+                template: 'Cleric',
+                fromX: currentActing.x,
+                fromY: currentActing.y,
+                toX: targetRef.x,
+                toY: targetRef.y
+              });
+            } else if (currentActing.isBuffer) {
+              const alliesInRange = targetCandidates.filter(t => (Math.abs(t.x - currentActing.x) + Math.abs(t.y - currentActing.y)) <= currentActing.range);
+              alliesInRange.forEach(ally => {
+                const allyRef = teamUnits.find(u => u.id === ally.id);
+                allyRef.buffs.push({ type: 'speed', amount: 0.5, duration: 30 });
+                newEffects.push({ id: Math.random(), targetId: ally.id, text: `Overclock!`, type: 'buff' });
+              });
+              newEffects.push({ id: Math.random(), targetId: currentActing.id, text: `♪`, type: 'buff' });
+              newEffects.push({
+                id: Math.random(),
+                type: 'cyberEffect',
+                template: 'Bard',
+                fromX: currentActing.x,
+                fromY: currentActing.y,
+                toX: currentActing.x,
+                toY: currentActing.y
+              });
+            } else if (currentActing.isDebuffer) {
+              const enemiesInRange = targetCandidates.filter(t => (Math.abs(t.x - closest.x) + Math.abs(t.y - closest.y)) <= 1);
+              const dmg = actualAtk;
+              enemiesInRange.forEach(enemy => {
+                const enemyRef = (closest.team === 'player' ? nextPlayers : nextEnemies).find(u => u.id === enemy.id);
+                enemyRef.hp -= dmg;
+                reportUpdate[currentActing.id].damage += dmg;
+                enemyRef.buffs.push({ type: 'atkDown', amount: -5, duration: 30 });
+                enemyRef.buffs.push({ type: 'speedDown', amount: -0.3, duration: 30 });
+                newEffects.push({ id: Math.random(), targetId: enemy.id, text: `-${dmg}`, type: 'damage' });
+                newEffects.push({ id: Math.random(), targetId: enemy.id, text: `ウイルス`, type: 'debuff' });
+              });
+              newEffects.push({ id: Math.random(), targetId: currentActing.id, text: `★`, type: 'buff' });
+              newEffects.push({
+                id: Math.random(),
+                type: 'cyberEffect',
+                template: 'Shaman',
+                fromX: currentActing.x,
+                fromY: currentActing.y,
+                toX: closest.x,
+                toY: closest.y
+              });
+            } else {
+              const dmg = actualAtk;
+              targetRef.hp -= dmg;
+              reportUpdate[currentActing.id].damage += dmg;
+              newEffects.push({ id: Math.random(), targetId: targetRef.id, text: `-${dmg}`, type: 'damage' });
+              newEffects.push({
+                id: Math.random(),
+                type: 'cyberEffect',
+                template: currentActing.template,
+                fromX: currentActing.x,
+                fromY: currentActing.y,
+                toX: targetRef.x,
+                toY: targetRef.y
+              });
+            }
+          } else {
+            const dx = closest.x - currentActing.x;
+            const dy = closest.y - currentActing.y;
+            
+            const isOccupied = (tx, ty) => {
+              if (tx < 0 || tx >= BOARD_WIDTH || ty < 0 || ty >= BOARD_HEIGHT) return true;
+              return [...nextPlayers, ...nextEnemies].some(u => u.status === 'board' && u.hp > 0 && u.x === tx && u.y === ty);
+            };
+
+            const tryMove = (tx, ty) => {
+              if (!isOccupied(tx, ty)) {
+                currentActing.x = tx;
+                currentActing.y = ty;
+                return true;
+              }
+              return false;
+            };
+
+            if (Math.abs(dx) > Math.abs(dy)) {
+              if (!tryMove(currentActing.x + Math.sign(dx), currentActing.y)) {
+                if (dy !== 0) tryMove(currentActing.x, currentActing.y + Math.sign(dy));
+                else {
+                  if (!tryMove(currentActing.x, currentActing.y + 1)) tryMove(currentActing.x, currentActing.y - 1);
+                }
+              }
+            } else if (dy !== 0) {
+              if (!tryMove(currentActing.x, currentActing.y + Math.sign(dy))) {
+                if (dx !== 0) tryMove(currentActing.x + Math.sign(dx), currentActing.y);
+                else {
+                  if (!tryMove(currentActing.x + 1, currentActing.y)) tryMove(currentActing.x - 1, currentActing.y);
+                }
+              }
+            }
+          }
+        }
+      });
+
+      setPlayerUnits(nextPlayers);
+      setEnemyUnits(nextEnemies);
+      setBattleReport(reportUpdate);
+      setEffects(newEffects); 
+      if (newLogs.length > 0) setBattleLogs(prev => [...newLogs, ...prev].slice(0, 10));
+
+    }, tickSpeed);
+
+    return () => clearTimeout(timer);
+  }, [gameState, playerUnits, enemyUnits, battleReport, handleBattleEnd]);
+
+  const renderUnit = (unit) => {
+    if (!unit || unit.hp <= 0) return null;
+    const Icon = ICONS[unit.icon];
+    const isEnemy = unit.team === 'enemy';
+    const hpPercent = Math.max(0, (unit.hp / unit.maxHp) * 100);
+    const gaugePercent = Math.min(100, unit.actionGauge);
+    const unitEffects = effects.filter(e => e.targetId === unit.id);
+    const hasSpeedBuff = unit.buffs && unit.buffs.some(b => b.type === 'speed');
+    const hasDebuff = unit.buffs && unit.buffs.some(b => b.type === 'atkDown' || b.type === 'speedDown');
+    const isTemporaryPromoted = promotedUnitId === unit.id;
+
+    // 直接のHEX指定
+    let iconColorStyle = {};
+    let iconClassName = "";
+    if (isEnemy) {
+      iconClassName = "text-rose-200";
+    } else if (unit.isHealer) {
+      iconClassName = "text-pink-200";
+    } else if (unit.isBuffer) {
+      iconClassName = "text-yellow-200";
+    } else if (unit.isDebuffer) {
+      iconClassName = "text-indigo-300";
+    } else if (unit.template === 'Mage') {
+      iconColorStyle = { color: '#E0B0FF' }; // コードブレイカー専用：確実なライトラベンダー
+    } else if (unit.template === 'Assassin') {
+      iconColorStyle = { color: '#00ADB5' }; // ネオアサシン専用：確実なダークシアン
+    } else if (unit.color.includes('rose') || unit.color.includes('zinc')) {
+      iconClassName = "text-white";
+    } else {
+      iconClassName = "text-cyan-200";
+    }
+
+    return (
+      <div className={`relative w-full h-full flex items-center justify-center rounded-full border-4 shadow-lg transition-all duration-150 ${isEnemy ? 'bg-rose-950 border-rose-500' : 'bg-slate-900 border-cyan-400'} ${hasSpeedBuff ? 'ring-2 ring-yellow-400 ring-offset-2 ring-offset-slate-900' : ''} ${hasDebuff ? 'opacity-80 grayscale-[50%]' : ''} ${isTemporaryPromoted ? 'animate-pulse ring-4 ring-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.5)]' : ''}`}>
+        
+        {unitEffects.map(e => (
+          <div key={e.id} className={`absolute z-50 font-mono font-black text-xl md:text-2xl drop-shadow-[0_2px_2px_rgba(0,0,0,1)] animate-float-text ${e.type === 'damage' ? 'text-rose-400' : e.type === 'heal' ? 'text-emerald-400' : e.type === 'debuff' ? 'text-indigo-400 font-bold' : 'text-yellow-300 text-sm'}`}>
+            {e.text}
+          </div>
+        ))}
+
+        {unit.items && unit.items.length > 0 && (
+          <div className="absolute -left-2 -top-1 flex flex-col gap-0.5 z-20">
+            {unit.items.map((it, idx) => {
+              const ItemIcon = ICONS[it.icon];
+              return (
+                <div key={idx} className="w-5 h-5 bg-slate-950 rounded-full border border-slate-600 flex items-center justify-center shadow">
+                   <ItemIcon size={12} className={it.icon === 'Wind' ? 'text-cyan-400' : it.icon === 'Sword' ? 'text-rose-400' : 'text-emerald-400'}/>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="absolute -top-3 flex gap-0.5 justify-center w-full z-10 drop-shadow-md">
+          {Array.from({ length: unit.star || 1 }).map((_, idx) => (
+            <Star key={idx} size={14} className={unit.star === 3 ? "text-yellow-300 fill-yellow-400" : unit.star === 2 ? "text-slate-300 fill-slate-300" : "text-amber-700 fill-amber-700"} />
+          ))}
+        </div>
+
+        <Icon size={24} style={iconColorStyle} className={`${iconClassName} ${hasSpeedBuff ? 'animate-pulse' : ''} ${hasDebuff ? 'text-opacity-50' : ''}`} />
+        
+        {/* HP Bar */}
+        <div className="absolute -bottom-2 w-10 h-2 bg-gray-950 rounded border border-gray-900 overflow-hidden">
+          <div className={`h-full ${isEnemy ? 'bg-rose-500' : 'bg-emerald-500'} transition-all duration-150`} style={{ width: `${hpPercent}%` }} />
+        </div>
+        {/* Action Gauge */}
+        <div className="absolute -bottom-4 w-8 h-1 bg-gray-950 rounded overflow-hidden">
+          <div className="h-full bg-cyan-400 transition-all duration-100" style={{ width: `${gaugePercent}%` }} />
+        </div>
+      </div>
+    );
+  };
+
+  const renderResultScreen = () => {
+    const playerReport = Object.values(battleReport)
+      .filter(r => r.team === 'player' && (r.damage > 0 || r.heal > 0))
+      .sort((a, b) => (b.damage + b.heal) - (a.damage + a.heal));
+    
+    const maxVal = Math.max(1, ...playerReport.map(r => r.damage + r.heal));
+
+    return (
+      <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/95 backdrop-blur-md rounded-xl p-6 border border-cyan-800">
+        <div className="text-3xl font-mono font-bold mb-2 text-cyan-400">{modalMessage}</div>
+        <div className="w-full max-w-md bg-slate-900 rounded-xl border border-slate-700 p-4 mb-6">
+          <h3 className="text-lg font-mono font-bold text-slate-300 mb-4 flex items-center gap-2"><BarChart3 size={20}/> 同期解析レポート (DPS)</h3>
+          <div className="flex flex-col gap-3 font-mono">
+            {playerReport.length === 0 ? <p className="text-slate-500 text-center">ログデータが存在しません</p> : 
+              playerReport.map((rep, i) => (
+              <div key={i} className="flex flex-col gap-1">
+                <div className="flex justify-between text-xs text-slate-300">
+                  <span className="font-bold flex items-center gap-1">
+                    {Array.from({length: rep.star}).map((_,j)=><Star key={j} size={10} className="fill-yellow-400 text-yellow-400"/>)} {rep.name}
+                  </span>
+                  <span>{rep.damage > 0 ? `${rep.damage} Dmg` : ''} {rep.heal > 0 ? `(${rep.heal} Heal)` : ''}</span>
+                </div>
+                <div className="w-full h-3 bg-slate-800 rounded overflow-hidden flex">
+                  {rep.damage > 0 && <div className="h-full bg-rose-500" style={{ width: `${(rep.damage / maxVal) * 100}%` }}></div>}
+                  {rep.heal > 0 && <div className="h-full bg-emerald-500" style={{ width: `${(rep.heal / maxVal) * 100}%` }}></div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <button onClick={proceedToNextRound} className="px-8 py-3 bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 rounded-lg font-mono font-bold text-xl transition shadow-lg shadow-cyan-900/50">
+          次世代へ同期する
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-4 flex flex-col items-center relative">
+      
+      {/* 突発サイバーハックイベントモーダル */}
+      {(isEventLoading || randomEvent) && gameState === 'prep' && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-purple-500 rounded-xl p-6 max-w-md w-full shadow-[0_0_25px_rgba(168,85,247,0.4)] relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 text-purple-500/10">
+              <Wand2 size={120} />
+            </div>
+            
+            {isEventLoading ? (
+              <div className="flex flex-col items-center py-8">
+                <RefreshCw size={40} className="text-purple-400 animate-spin mb-4" />
+                <h3 className="text-xl font-mono font-bold text-purple-300 mb-2">ハッキングイベント解析中...</h3>
+                <p className="text-slate-400 text-sm font-mono">メインフレームに侵入してコードを精査しています...</p>
+              </div>
+            ) : randomEvent ? (
+              <div className="relative z-10 flex flex-col font-mono">
+                <h3 className="text-2xl font-bold text-yellow-400 mb-2 border-b border-slate-700 pb-2 flex items-center gap-2">
+                  <Sparkles className="text-yellow-400" size={24}/> {randomEvent.title}
+                </h3>
+                <p className="text-slate-300 text-sm leading-relaxed mb-6 min-h-[4rem]">
+                  {randomEvent.description}
+                </p>
+                
+                <div className="bg-slate-800 rounded-lg p-3 mb-6 border border-slate-700 flex items-center gap-3">
+                  {randomEvent.effect === 'REWARD_GOLD' && <Coins className="text-yellow-400" size={24} />}
+                  {randomEvent.effect === 'REWARD_ITEM' && <Shield className="text-cyan-400" size={24} />}
+                  {randomEvent.effect === 'REWARD_UNIT' && <Plus className="text-green-400" size={24} />}
+                  {randomEvent.effect === 'PUNISH_ENEMY_BUFF' && <Skull className="text-red-500" size={24} />}
+                  {randomEvent.effect === 'FREE_SHOP_REFRESH' && <RefreshCw className="text-pink-400" size={24} />}
+                  {randomEvent.effect === 'PROMOTED_UNIT' && <Sparkles className="text-yellow-400 animate-bounce" size={24} />}
+                  
+                  <span className="font-bold text-xs text-slate-200">
+                    {randomEvent.effect === 'REWARD_GOLD' && "効果：リソース（暗号通貨）を自動送金"}
+                    {randomEvent.effect === 'REWARD_ITEM' && "効果：新規ハードウェアデバイスを獲得"}
+                    {randomEvent.effect === 'REWARD_UNIT' && "効果：ランダムプログラムをバックドア注入"}
+                    {randomEvent.effect === 'PUNISH_ENEMY_BUFF' && "効果：メインフレーム緊急防衛ロック（敵セキュリティ強化）"}
+                    {randomEvent.effect === 'FREE_SHOP_REFRESH' && "効果：マーケット高速リロード（ショップ無料自動更新）"}
+                    {randomEvent.effect === 'PROMOTED_UNIT' && "効果：1プログラムを期間限定で強制【★3オーバークロック】"}
+                  </span>
+                </div>
+                
+                <button 
+                  onClick={applyEventEffect}
+                  className="w-full py-3 bg-purple-600 hover:bg-purple-500 active:bg-purple-700 text-white font-bold rounded-lg transition"
+                >
+                  パッチを適用する
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* 図鑑（DATABASE）モーダル */}
+      {isDbOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/85 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border-2 border-cyan-500 rounded-xl p-5 max-w-xl w-full max-h-[80vh] shadow-[0_0_25px_rgba(6,182,212,0.4)] relative flex flex-col font-mono overflow-hidden">
+            <div className="flex justify-between items-center border-b border-cyan-900 pb-3 mb-4 shrink-0">
+              <h3 className="text-xl font-bold text-cyan-400 flex items-center gap-2">
+                <Sparkles size={20} className="text-cyan-400 animate-pulse" />
+                PROGRAM DATABASE (図鑑)
+              </h3>
+              <button 
+                onClick={() => setIsDbOpen(false)} 
+                className="text-slate-400 hover:text-white bg-slate-800 p-1.5 rounded-full border border-slate-700 transition"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* タブ切り替え */}
+            <div className="flex gap-2 mb-4 shrink-0">
+              <button 
+                onClick={() => setDbTab('units')}
+                className={`flex-1 py-2 rounded-lg font-bold text-sm text-center border transition-all ${
+                  dbTab === 'units' 
+                    ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750'
+                }`}
+              >
+                プログラム (駒)
+              </button>
+              <button 
+                onClick={() => setDbTab('items')}
+                className={`flex-1 py-2 rounded-lg font-bold text-sm text-center border transition-all ${
+                  dbTab === 'items' 
+                    ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-[0_0_10px_rgba(6,182,212,0.2)]' 
+                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-750'
+                }`}
+              >
+                ハードウェア (アイテム)
+              </button>
+            </div>
+
+            {/* スクロールエリア */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar pr-1 flex flex-col gap-3">
+              {dbTab === 'units' ? (
+                Object.entries(UNIT_DATA).map(([key, data]) => {
+                  const Icon = ICONS[data.icon];
+                  let iconColorStyle = {};
+                  if (key === 'Mage') iconColorStyle = { color: '#E0B0FF' };
+                  else if (key === 'Assassin') iconColorStyle = { color: '#00ADB5' };
+                  
+                  return (
+                    <div key={key} className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-start gap-3">
+                      <div className="p-2 rounded bg-slate-900 border border-slate-700 shrink-0 text-cyan-400" style={iconColorStyle}>
+                        <Icon size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-cyan-300 text-sm">{data.name}</span>
+                          <span className="text-[10px] text-yellow-500 shrink-0 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                            {data.cost > 0 ? `${data.cost}G` : 'BOSS'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-[10px] text-slate-400 bg-slate-900/60 p-1.5 rounded border border-slate-800/50 mb-2">
+                          <span>HP: <strong className="text-emerald-400">{data.hp}</strong></span>
+                          <span>ATK: <strong className="text-rose-400">{data.atk}</strong></span>
+                          <span>SPD: <strong className="text-cyan-400">{data.speed}</strong></span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">{DB_UNIT_DESC[key]}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                Object.entries(ITEM_DATA).map(([key, data]) => {
+                  const Icon = ICONS[data.icon];
+                  return (
+                    <div key={key} className="p-3 rounded-lg bg-slate-950 border border-slate-800 flex items-start gap-3">
+                      <div className={`p-2 rounded bg-slate-900 border border-slate-700 shrink-0 ${data.color}`}>
+                        <Icon size={24} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-purple-300 text-sm">{data.name}</span>
+                          <span className="text-[10px] text-yellow-500 shrink-0 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">
+                            {data.cost}G
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">{DB_ITEM_DESC[key]}</p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
+      <div className="w-full max-w-3xl flex justify-between items-center bg-slate-900 p-4 rounded-xl shadow-md border border-cyan-900/50 mb-6">
+        <div className="flex items-center gap-6 font-mono">
+          <div className="text-2xl font-bold text-cyan-400">LEVEL {round}</div>
+          
+          {gameState === 'battle' && (
+            <div className={`flex items-center gap-1 text-xl font-bold ${timeLeft <= 30 ? 'text-rose-500 animate-pulse' : 'text-slate-300'}`}>
+              <Timer size={24} />
+              {Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, '0')}
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-xl font-semibold relative group">
+            <Coins className="text-yellow-400" /> {gold} G
+            <div className="absolute top-full left-0 mt-2 w-max px-2 py-1 bg-slate-800 text-xs text-slate-300 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-20 border border-slate-700">
+              現在のリソース利息: +{calculateInterest(gold)}G (3Gプールごとに+1)
+            </div>
+          </div>
+          <div className="flex items-center gap-1 text-xl font-semibold">
+            <Heart className="text-rose-500 animate-pulse" /> 
+            {Array.from({length: 3}).map((_, i) => (
+              <span key={i} className={i < playerHp ? 'text-rose-500' : 'text-slate-600 opacity-30'}>♥</span>
+            ))}
+          </div>
+
+          {/* 図鑑ボタン */}
+          <button 
+            onClick={() => setIsDbOpen(true)}
+            className="flex items-center gap-1 text-xs md:text-sm px-2.5 py-1.5 bg-slate-850 hover:bg-slate-750 active:bg-slate-900 border border-cyan-500/50 text-cyan-300 font-mono rounded-lg transition ml-2 shadow-[0_0_10px_rgba(6,182,212,0.15)]"
+            title="プログラム・ハードウェア性能図鑑を開く"
+          >
+            <Sparkles size={14} className="text-cyan-400" />
+            <span>図鑑</span>
+          </button>
+        </div>
+        <div className="text-xs px-3 py-1 bg-slate-800 rounded-full text-cyan-300 font-mono">
+          {gameState === 'prep' ? 'ビルドフェーズ' : gameState === 'battle' ? 'シミュレート実行中' : '同期完了'}
+        </div>
+      </div>
+
+      <div className="w-full max-w-3xl grid grid-cols-1 md:grid-cols-3 gap-6">
+        
+        {/* Left Side: Board & Bench */}
+        <div className="md:col-span-2 flex flex-col gap-4">
+          
+          <div className="bg-slate-900 p-4 rounded-xl border border-cyan-950 relative">
+            {gameState === 'result' && renderResultScreen()}
+            {gameState === 'gameover' && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-rose-950/90 rounded-xl backdrop-blur-md">
+                <Skull size={64} className="text-rose-500 mb-4 animate-bounce" />
+                <div className="text-4xl font-mono font-bold text-rose-500 mb-2">MAIN FRAME CRASHED</div>
+                <div className="text-xl text-rose-200 font-mono">Cleared Security: {round - 1} Levels</div>
+                <button onClick={() => window.location.reload()} className="mt-6 px-6 py-2 bg-rose-600 hover:bg-rose-500 rounded-lg font-mono font-bold transition">再起動（リトライ）</button>
+              </div>
+            )}
+            {gameState === 'victory' && (
+              <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-cyan-950/90 rounded-xl backdrop-blur-md border-2 border-cyan-400">
+                <Trophy size={64} className="text-cyan-300 mb-4 animate-pulse" />
+                <div className="text-4xl font-mono font-bold text-cyan-300 mb-2">GRID CONQUERED!</div>
+                <div className="text-xl text-cyan-100 font-mono">Master System Overridden</div>
+                <button onClick={() => window.location.reload()} className="mt-6 px-6 py-2 bg-cyan-600 hover:bg-cyan-500 rounded-lg font-mono font-bold transition">もう一度ハックする</button>
+              </div>
+            )}
+
+            <div className="grid grid-cols-4 gap-2">
+              {Array.from({ length: BOARD_HEIGHT }).map((_, y) => (
+                Array.from({ length: BOARD_WIDTH }).map((_, x) => {
+                  const isPlayerArea = y >= 2;
+                  const unit = [...playerUnits, ...enemyUnits].find(u => u.status === 'board' && u.x === x && u.y === y);
+                  const isSelected = selectedCell && selectedCell.area === 'board' && selectedCell.x === x && selectedCell.y === y;
+                  const isItemEquipMode = selectedItemIndex !== null;
+                  const canInteract = gameState === 'prep' && isPlayerArea;
+
+                  return (
+                    <div 
+                      key={`board-${x}-${y}`} 
+                      onClick={() => canInteract ? handleCellClick('board', x, y) : null}
+                      className={`
+                        w-16 h-16 md:w-20 md:h-20 lg:w-24 lg:h-24 rounded-lg flex items-center justify-center relative transition-all
+                        ${isPlayerArea ? 'bg-cyan-950/10 hover:bg-cyan-900/20' : 'bg-rose-950/10'}
+                        ${isSelected ? 'ring-4 ring-yellow-400 ring-inset' : ''}
+                        ${isItemEquipMode && canInteract && unit ? 'ring-4 ring-purple-400 ring-inset cursor-copy' : ''}
+                        ${canInteract ? 'cursor-pointer' : 'cursor-default'}
+                        border border-slate-800
+                      `}
+                    >
+                      {renderUnit(unit)}
+                      {!isPlayerArea && gameState === 'prep' && <div className="absolute inset-0 bg-slate-950/60 flex items-center justify-center text-xs text-rose-500 font-mono text-center pointer-events-none">HOSTILE<br/>GRID</div>}
+                    </div>
+                  );
+                })
+              ))}
+
+              {/* サイバーハック攻撃エフェクト描画レイヤー */}
+              <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
+                {/* ライン系 (レーザー等) SVG */}
+                <svg className="absolute inset-0 w-full h-full">
+                  {effects.filter(e => e.type === 'cyberEffect').map(e => {
+                    const from = getCellCenter(e.fromX, e.fromY);
+                    const to = getCellCenter(e.toX, e.toY);
+                    
+                    if (e.template === 'Archer') { // レーザーレイダー
+                      return (
+                        <line 
+                          key={e.id} 
+                          x1={from.x} y1={from.y} x2={to.x} y2={to.y} 
+                          stroke="#10b981" strokeWidth="3" 
+                          className="animate-neon-beam"
+                        />
+                      );
+                    }
+                    if (e.template === 'Mage') { // コードブレイカー
+                      return (
+                        <line 
+                          key={e.id} 
+                          x1={from.x} y1={from.y} x2={to.x} y2={to.y} 
+                          stroke="#d946ef" strokeWidth="4" strokeDasharray="5,5" 
+                          className="animate-neon-pulse"
+                        />
+                      );
+                    }
+                    if (e.template === 'Archmage') { // 量子マスター
+                      return (
+                        <g key={e.id}>
+                          <line 
+                            x1={from.x} y1={from.y} x2={to.x} y2={to.y} 
+                            stroke="#f43f5e" strokeWidth="12" 
+                            className="animate-quantum-laser-outer"
+                          />
+                          <line 
+                            x1={from.x} y1={from.y} x2={to.x} y2={to.y} 
+                            stroke="#ffffff" strokeWidth="4" 
+                            className="animate-quantum-laser-inner"
+                          />
+                        </g>
+                      );
+                    }
+                    return null;
+                  })}
+                </svg>
+
+                {/* ターゲットセル上のスポット配置エフェクト */}
+                {effects.filter(e => e.type === 'cyberEffect').map(e => {
+                  const to = getCellCenter(e.toX, e.toY);
+                  const style = { left: to.x, top: to.y, transform: 'translate(-50%, -50%)' };
+
+                  if (e.template === 'Knight') { // サイバーナイト
+                    return (
+                      <div key={e.id} style={style} className="absolute w-16 h-16 flex items-center justify-center">
+                        <div className="w-full h-1 bg-cyan-400 rotate-[35deg] animate-slash-cut shadow-[0_0_10px_#22d3ee]" />
+                      </div>
+                    );
+                  }
+                  if (e.template === 'Defender') { // シールドアーマー
+                    return (
+                      <div key={e.id} style={style} className="absolute w-20 h-20 rounded-full border-4 border-zinc-500 animate-shockwave-pulse" />
+                    );
+                  }
+                  if (e.template === 'Assassin') { // ネオアサシン
+                    return (
+                      <div key={e.id} style={style} className="absolute w-16 h-16 flex items-center justify-center">
+                        <div className="absolute w-full h-1.5 bg-rose-500 rotate-45 animate-slash-cut shadow-[0_0_8px_#f43f5e]" />
+                        <div className="absolute w-full h-1.5 bg-rose-500 -rotate-45 animate-slash-cut shadow-[0_0_8px_#f43f5e]" />
+                      </div>
+                    );
+                  }
+                  if (e.template === 'Cleric') { // ナノメディック
+                    return (
+                      <div key={e.id} style={style} className="absolute w-14 h-14 bg-emerald-500/20 border border-emerald-400 rounded animate-heal-grid flex items-center justify-center">
+                        <Plus className="text-emerald-400 animate-bounce" size={24} />
+                      </div>
+                    );
+                  }
+                  if (e.template === 'Bard') { // アンプリファイア
+                    const selfPos = getCellCenter(e.fromX, e.fromY);
+                    return (
+                      <div key={e.id} style={{ left: selfPos.x, top: selfPos.y, transform: 'translate(-50%, -50%)' }} className="absolute w-24 h-24 rounded-full border-2 border-dashed border-amber-400 animate-sonic-pulse" />
+                    );
+                  }
+                  if (e.template === 'Shaman') { // ハッカー
+                    return (
+                      <div key={e.id} style={style} className="absolute px-2 py-1 bg-indigo-950/90 border border-indigo-500 font-mono text-[9px] text-indigo-300 rounded animate-glitch-shake select-none shadow-[0_0_10px_rgba(99,102,241,0.5)]">
+                        &lt;SYS_ERR_404&gt;
+                      </div>
+                    );
+                  }
+                  if (e.template === 'Dragon') { // AI-DRAGON
+                    return (
+                      <div key={e.id} style={style} className="absolute w-24 h-24 bg-rose-950/60 border-2 border-rose-600 flex items-center justify-center animate-dragon-blast">
+                        <Skull className="text-rose-500 animate-pulse" size={40} />
+                      </div>
+                    );
+                  }
+                  return null;
+                })}
+              </div>
+
+            </div>
+            
+            {gameState === 'prep' && selectedCell && getSelectedUnit() && (
+              <div className="mt-4 p-4 bg-rose-950/40 rounded-xl border border-rose-900/50 flex justify-between items-center transition-all font-mono">
+                <div className="flex items-center gap-3">
+                  <div className="text-sm text-slate-300">プログラムの売却：</div>
+                  <div className="font-bold text-yellow-400 text-lg">
+                    +{getSelectedUnit().cost * Math.pow(3, getSelectedUnit().star - 1)} G
+                  </div>
+                </div>
+                <button onClick={sellSelectedUnit} className="px-6 py-2 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 rounded-lg font-bold transition flex items-center gap-2 shadow-lg">
+                  <Coins size={18} /> パージ実行
+                </button>
+              </div>
+            )}
+
+            {gameState === 'prep' && (
+              <button onClick={startBattle} className="w-full mt-6 py-4 bg-cyan-600 hover:bg-cyan-500 active:bg-cyan-700 text-white font-mono font-bold text-xl rounded-xl shadow-lg flex items-center justify-center gap-2 transition-transform hover:scale-[1.02]">
+                <Play fill="currentColor" /> SIMULATOR EXECUTE
+              </button>
+            )}
+          </div>
+
+          <div className="flex gap-4 font-mono">
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex-1">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-semibold text-slate-400">待機メモリ</h3>
+                <span className="text-xs text-slate-500">{playerUnits.filter(u=>u.status==='bench').length} / {BENCH_SIZE}</span>
+              </div>
+              <div className="flex gap-2">
+                {Array.from({ length: BENCH_SIZE }).map((_, i) => {
+                  const unit = playerUnits.find(u => u.status === 'bench' && u.index === i);
+                  const isSelected = selectedCell && selectedCell.area === 'bench' && selectedCell.index === i;
+                  const isItemEquipMode = selectedItemIndex !== null;
+                  
+                  return (
+                    <div 
+                      key={`bench-${i}`}
+                      onClick={() => handleCellClick('bench', null, null, i)}
+                      className={`
+                        flex-1 aspect-square max-w-[4rem] lg:max-w-[5rem] rounded-lg bg-slate-800/30 border border-slate-700
+                        flex items-center justify-center cursor-pointer hover:bg-slate-700/50 transition-all
+                        ${isSelected ? 'ring-4 ring-yellow-400 ring-inset' : ''}
+                        ${isItemEquipMode && unit ? 'ring-4 ring-purple-400 ring-inset cursor-copy' : ''}
+                      `}
+                    >
+                      {renderUnit(unit)}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex-1 relative">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="text-sm font-semibold text-purple-300">ハードウェア</h3>
+                <span className="text-xs text-slate-500">{inventory.length} / 4</span>
+              </div>
+              {selectedItemIndex !== null && (
+                 <button onClick={() => setSelectedItemIndex(null)} className="absolute top-2 right-12 text-slate-400 hover:text-white bg-slate-800 rounded-full p-1"><X size={14}/></button>
+              )}
+              <div className="flex gap-2">
+                {Array.from({ length: 4 }).map((_, i) => {
+                  const item = inventory[i];
+                  const isSelected = selectedItemIndex === i;
+                  
+                  return (
+                    <div 
+                      key={`inv-${i}`}
+                      onClick={() => item ? (selectedItemIndex === i ? setSelectedItemIndex(null) : setSelectedItemIndex(i)) : null}
+                      className={`
+                        flex-1 aspect-square max-w-[4rem] lg:max-w-[5rem] rounded-lg bg-slate-800/30 border border-slate-700
+                        flex items-center justify-center transition-all
+                        ${item ? 'cursor-pointer hover:bg-slate-700' : ''}
+                        ${isSelected ? 'ring-4 ring-purple-400 ring-inset bg-slate-700' : ''}
+                      `}
+                    >
+                      {item && (
+                        <div className="flex flex-col items-center">
+                          {item.icon === 'Wind' ? <Wind size={20} className="text-cyan-400"/> : item.icon === 'Sword' ? <Sword size={20} className="text-rose-400"/> : <Shield size={20} className="text-emerald-400"/>}
+                          <span className="text-[9px] text-slate-300 mt-1">{item.atk > 0 ? `+ATK` : item.speed > 0 ? `+SPD` : `+HP`}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              {selectedItemIndex !== null && <p className="text-[10px] text-purple-300 mt-2 text-center animate-pulse">装備先のスロットを選択</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: Shop & Logs */}
+        <div className="flex flex-col gap-4">
+          
+          {/* AI Advisor / タクティカルAI */}
+          <div className="bg-slate-900 p-4 rounded-xl border border-cyan-950">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-sm font-semibold text-slate-400 text-indigo-300 font-mono">AIタクティシャン</h3>
+              <button 
+                onClick={getGeminiAdvice} 
+                disabled={isLoadingAdvice || gameState !== 'prep'} 
+                className="flex items-center gap-1 text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 rounded border border-indigo-500 transition shadow-lg text-white font-mono"
+              >
+                ✨ 助言を求める
+              </button>
+            </div>
+            <div className="text-xs text-slate-300 min-h-[3.5rem] bg-slate-950 p-3 rounded-lg border border-slate-800 leading-relaxed font-mono">
+              {isLoadingAdvice ? (
+                <span className="animate-pulse text-indigo-400">戦況ログをハックし、防衛最適解を演算中...</span>
+              ) : aiAdvice ? (
+                <span>{aiAdvice}</span>
+              ) : (
+                <span className="text-slate-500">ボタンを押すと、現在のプログラム配備状況に基づいた電脳戦術アドバイスを受け取れます。</span>
+              )}
+            </div>
+          </div>
+
+          <div className={`bg-slate-900 p-4 rounded-xl border transition-all ${isAutoRefreshActive && gameState === 'prep' ? 'border-pink-500 shadow-[0_0_15px_rgba(236,72,153,0.3)]' : 'border-slate-800'}`}>
+            <div className="flex justify-between items-center mb-3 font-mono">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-400">ブラックマーケット</h3>
+                {isAutoRefreshActive && gameState === 'prep' && (
+                  <span className="text-[10px] bg-pink-600 text-white px-2 py-0.5 rounded-full animate-pulse">
+                    FEEVER (3秒自動同期)
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={() => setIsShopLocked(!isShopLocked)} 
+                  disabled={gameState !== 'prep'}
+                  className={`p-1.5 rounded transition ${isShopLocked ? 'bg-amber-600/20 text-amber-400 border border-amber-600/50' : 'bg-slate-800 hover:bg-slate-750 text-slate-400 border border-slate-700'}`}
+                  title="ショップをロック（次のラウンドで更新されません）"
+                >
+                  {isShopLocked ? <Lock size={14} /> : <Unlock size={14} />}
+                </button>
+                <button onClick={manualRefresh} disabled={gameState !== 'prep' || gold < 1} className="flex items-center gap-1 text-xs px-2 py-1.5 bg-slate-800 hover:bg-slate-750 disabled:opacity-50 rounded border border-slate-600 transition">
+                  <RefreshCw size={14} className={isAutoRefreshActive && gameState === 'prep' && !isShopLocked ? 'animate-spin text-pink-400' : ''} /> 1G
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex flex-col gap-2 font-mono">
+              {/* ユニット枠 (4枠) */}
+              {shop.units.map((item, i) => {
+                if (!item) return <div key={i} className="h-[3.5rem] rounded-lg bg-slate-800/10 border border-slate-800 border-dashed animate-pulse" />;
+                const data = UNIT_DATA[item.template];
+                const Icon = ICONS[data.icon];
+                
+                // ショップ内アイコンのインライン色指定
+                let shopIconStyle = {};
+                let shopIconClass = "";
+                if (item.template === 'Mage') {
+                  shopIconStyle = { color: '#E0B0FF' };
+                } else if (item.template === 'Assassin') {
+                  shopIconStyle = { color: '#00ADB5' };
+                } else {
+                  shopIconClass = item.template === 'Knight' ? 'text-cyan-400' : item.template === 'Archer' ? 'text-emerald-400' : item.template === 'Defender' ? 'text-slate-400' : item.template === 'Cleric' ? 'text-rose-400' : item.template === 'Bard' ? 'text-yellow-400' : item.template === 'Shaman' ? 'text-indigo-400' : item.template === 'Mage' ? 'text-violet-300' : item.template === 'Assassin' ? 'text-cyan-600' : item.template === 'Archmage' ? 'text-red-400' : 'text-purple-400';
+                }
+
+                return (
+                  <button key={i} onClick={() => buyUnit(item, i)} disabled={gameState !== 'prep' || gold < item.cost} className="flex items-center gap-3 w-full p-2 rounded-lg bg-slate-850 hover:bg-slate-800 disabled:opacity-50 border border-slate-700 transition text-left group">
+                    <div className={`p-1.5 rounded bg-slate-950 border border-slate-600 group-hover:scale-110 transition`}>
+                      <Icon size={18} style={shopIconStyle} className={shopIconClass} />
+                    </div>
+                    <div className="flex-1 leading-tight"><div className="font-bold text-sm">{data.name}</div><div className="text-[10px] text-slate-400">HP {data.hp} / ATK {data.atk}</div></div>
+                    <div className="font-bold text-yellow-400 text-sm shrink-0 bg-slate-950 px-2 py-1 rounded">{item.cost} G</div>
+                  </button>
+                );
+              })}
+              
+              <div className="border-t border-slate-800 my-1"></div>
+              
+              {/* アイテム枠 */}
+              {shop.item ? (() => {
+                const itemData = ITEM_DATA[shop.item.template];
+                const ItemIcon = ICONS[itemData.icon];
+                return (
+                  <button onClick={buyItem} disabled={gameState !== 'prep' || gold < shop.item.cost || inventory.length >= 4} className="flex items-center gap-3 w-full p-2 rounded-lg bg-purple-900/20 hover:bg-purple-800/30 disabled:opacity-50 border border-purple-800/30 transition text-left group">
+                    <div className="p-1.5 rounded bg-slate-950 border border-purple-600 group-hover:scale-110 transition"><ItemIcon size={18} className={itemData.color} /></div>
+                    <div className="flex-1 leading-tight"><div className="font-bold text-purple-300 text-sm">{itemData.name}</div><div className="text-[10px] text-slate-400">{itemData.atk > 0 ? `ATK +${itemData.atk}` : itemData.speed > 0 ? `SPD +${itemData.speed}` : `HP +${itemData.hp}`}</div></div>
+                    <div className="font-bold text-yellow-400 text-sm shrink-0 bg-slate-950 px-2 py-1 rounded">{shop.item.cost} G</div>
+                  </button>
+                );
+              })() : <div className="h-[3.5rem] rounded-lg bg-purple-900/10 border border-purple-900/20 border-dashed animate-pulse" />}
+
+            </div>
+          </div>
+
+          <div className="bg-slate-900 p-4 rounded-xl border border-slate-800 flex-1 overflow-hidden flex flex-col max-h-48 lg:max-h-64 font-mono">
+            <h3 className="text-sm font-semibold text-slate-400 mb-2 flex items-center gap-2"><ShieldAlert size={16}/> システムログ</h3>
+            <div className="flex-1 overflow-y-auto flex flex-col gap-1 pr-1 custom-scrollbar">
+              {battleLogs.length === 0 && <div className="text-slate-600 text-[10px]">ネットワーク同期時にログ出力されます...</div>}
+              {battleLogs.map((log, i) => (
+                <div key={i} className={`text-[10px] px-2 py-1 rounded ${log.startsWith('[SYSTEM') || log.startsWith('【') ? 'bg-cyan-950/40 text-cyan-300 border border-cyan-800/30' : 'bg-slate-950 text-slate-400'}`}>
+                  {log}
+                </div>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <style dangerouslySetInnerHTML={{__html: `
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 4px; }
+        
+        @keyframes floatText {
+          0% { transform: translateY(10px) scale(0.8); opacity: 0; }
+          20% { transform: translateY(0px) scale(1.2); opacity: 1; }
+          80% { transform: translateY(-15px) scale(1); opacity: 1; }
+          100% { transform: translateY(-25px) scale(0.8); opacity: 0; }
+        }
+        .animate-float-text {
+          animation: floatText 0.7s ease-out forwards;
+        }
+
+        /* ビームレーザー */
+        @keyframes neonBeam {
+          0% { stroke-dashoffset: 100%; opacity: 1; }
+          100% { stroke-dashoffset: 0%; opacity: 0; }
+        }
+        .animate-neon-beam {
+          stroke-dasharray: 20;
+          animation: neonBeam 0.25s linear forwards;
+        }
+
+        /* 破線パルス */
+        @keyframes neonPulse {
+          0% { opacity: 1; stroke-width: 4px; }
+          100% { opacity: 0; stroke-width: 1px; }
+        }
+        .animate-neon-pulse {
+          animation: neonPulse 0.2s ease-out forwards;
+        }
+
+        /* 量子ビーム (極太) */
+        @keyframes quantumLaserOuter {
+          0% { stroke-width: 12px; opacity: 1; }
+          50% { stroke-width: 16px; opacity: 1; filter: drop-shadow(0 0 8px #f43f5e); }
+          100% { stroke-width: 0px; opacity: 0; }
+        }
+        @keyframes quantumLaserInner {
+          0% { stroke-width: 4px; opacity: 1; }
+          100% { stroke-width: 0px; opacity: 0; }
+        }
+        .animate-quantum-laser-outer {
+          animation: quantumLaserOuter 0.3s ease-out forwards;
+        }
+        .animate-quantum-laser-inner {
+          animation: quantumLaserInner 0.3s ease-out forwards;
+        }
+
+        /* ネオンスラッシュ */
+        @keyframes slashCut {
+          0% { transform: scaleX(0); opacity: 1; }
+          40% { transform: scaleX(1.2); opacity: 1; }
+          100% { transform: scaleX(1); opacity: 0; }
+        }
+        .animate-slash-cut {
+          transform-origin: center;
+          animation: slashCut 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* 衝撃波バッシュ */
+        @keyframes shockwavePulse {
+          0% { transform: scale(0.2); opacity: 1; }
+          100% { transform: scale(1.2); opacity: 0; border-width: 1px; }
+        }
+        .animate-shockwave-pulse {
+          animation: shockwavePulse 0.25s ease-out forwards;
+        }
+
+        /* ナノマシンヒール */
+        @keyframes healGrid {
+          0% { transform: scale(0.8) translateY(5px); opacity: 0; }
+          30% { transform: scale(1) translateY(0); opacity: 1; }
+          100% { transform: scale(1) translateY(-5px); opacity: 0; }
+        }
+        .animate-heal-grid {
+          animation: healGrid 0.3s ease-out forwards;
+        }
+
+        /* ソニックウェーブ */
+        @keyframes sonicPulse {
+          0% { transform: scale(0.1); opacity: 1; }
+          100% { transform: scale(1.3); opacity: 0; }
+        }
+        .animate-sonic-pulse {
+          animation: sonicPulse 0.3s ease-out forwards;
+        }
+
+        /* デジタルグリッチバグ */
+        @keyframes glitchShake {
+          0%, 100% { transform: translate(-50%, -50%) translate(0); }
+          20% { transform: translate(-50%, -50%) translate(-2px, 1px); }
+          40% { transform: translate(-50%, -50%) translate(1px, -1px); }
+          60% { transform: translate(-50%, -50%) translate(-1px, -1px); }
+          80% { transform: translate(-50%, -50%) translate(2px, 1px); }
+        }
+        .animate-glitch-shake {
+          animation: glitchShake 0.25s linear infinite;
+        }
+
+        /* ドラゴンオーバーフロー */
+        @keyframes dragonBlast {
+          0% { transform: scale(0.5); opacity: 0; filter: hue-rotate(0deg); }
+          20% { transform: scale(1.1); opacity: 1; filter: hue-rotate(90deg); }
+          100% { transform: scale(1); opacity: 0; filter: hue-rotate(180deg); }
+        }
+        .animate-dragon-blast {
+          animation: dragonBlast 0.35s ease-out forwards;
+        }
+      `}} />
+    </div>
+  );
+}
